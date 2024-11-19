@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -27,17 +28,6 @@ type Parcel struct {
 	Address string `json:"address"`
 	// CreatedAt is the timestamp of when the parcel was created.
 	CreatedAt string `json:"created_at"`
-}
-
-// ParcelStore is a struct that represents the storage layer for parcels.
-//
-// It encapsulates a connection to the database, allowing for operations
-// related to parcel records to be conducted. The `db` field is a pointer
-// to an sql.DB instance, which is used to interact with the underlying
-// database for adding, retrieving, and managing parcel data.
-type ParcelStore struct {
-	// db is a pointer to the SQL database connection.
-	db *sql.DB
 }
 
 // ParcelService provides operations for managing parcels.
@@ -205,6 +195,17 @@ func (s ParcelService) Delete(number int) error {
 	return s.store.Delete(number)
 }
 
+// ParcelStore is a struct that represents the storage layer for parcels.
+//
+// It encapsulates a connection to the database, allowing for operations
+// related to parcel records to be conducted. The `db` field is a pointer
+// to an sql.DB instance, which is used to interact with the underlying
+// database for adding, retrieving, and managing parcel data.
+type ParcelStore struct {
+	// db is a pointer to the SQL database connection.
+	db *sql.DB
+}
+
 // NewParcelStore creates a new ParcelStore instance.
 //
 // This function initializes a new ParcelStore using the provided
@@ -221,49 +222,122 @@ func NewParcelStore(db *sql.DB) ParcelStore {
 	return ParcelStore{db: db}
 }
 
+// Add inserts a new parcel into the database and returns the newly created parcel's ID.
+//
+// Parameters:
+// - p: the Parcel object containing the details of the parcel to be added.
+//
+// Returns:
+// - The ID of the last inserted Parcel.
+// - An error, if any occurs during the insert operation.
 func (s ParcelStore) Add(p Parcel) (int, error) {
-	// реализуйте добавление строки в таблицу parcel, используйте данные из переменной p
+	result, err := s.db.Exec("INSERT INTO parcel (number, client, status, address, created_at) VALUES (?, ?, ?, ?, ?)",
+		p.Number, p.Client, p.Status, p.Address, p.CreatedAt)
+	if err != nil {
+		return 0, err
+	}
+
+	lastParcelID, err := result.LastInsertId()
+	if err != nil {
+		return 0, nil
+	}
 
 	// верните идентификатор последней добавленной записи
-	return 0, nil
+	return int(lastParcelID), nil
 }
 
+// Get retrieves a parcel from the database by its number.
+//
+// Parameters:
+// - number: the unique number of the parcel to retrieve.
+//
+// Returns:
+// - The Parcel object corresponding to the given number.
+// - An error, if any occurs during the retrieval operation.
 func (s ParcelStore) Get(number int) (Parcel, error) {
-	// реализуйте чтение строки по заданному number
-	// здесь из таблицы должна вернуться только одна строка
+	row := s.db.QueryRow("SELECT number, client, status, address, created_at FROM parcel WHERE id = ?", number)
 
-	// заполните объект Parcel данными из таблицы
 	p := Parcel{}
+
+	err := row.Scan(&p.Number, &p.Client, &p.Status, &p.Address, &p.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Parcel{}, nil
+	}
+
+	if err != nil {
+		return Parcel{}, err
+	}
 
 	return p, nil
 }
 
+// GetByClient retrieves a list of parcels associated with a specific client.
+//
+// Parameters:
+// - client: the unique identifier of the client whose parcels are to be retrieved.
+//
+// Returns:
+// - A slice of Parcel objects corresponding to the given client.
+// - An error, if any occurs during the retrieval operation.
 func (s ParcelStore) GetByClient(client int) ([]Parcel, error) {
-	// реализуйте чтение строк из таблицы parcel по заданному client
-	// здесь из таблицы может вернуться несколько строк
+	rows, err := s.db.Query("SELECT number, client, status, address, created_at FROM percel WHERE client = ?", client)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
 
-	// заполните срез Parcel данными из таблицы
-	var res []Parcel
+	var parcels []Parcel
+	for rows.Next() {
+		var newParcel Parcel
 
-	return res, nil
+		err = rows.Scan(&newParcel.Number, &newParcel.Client, &newParcel.Status, &newParcel.Address, &newParcel.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+
+		parcels = append(parcels, newParcel)
+	}
+
+	return parcels, nil
 }
 
+// SetStatus updates the status of a parcel identified by its number.
+//
+// Parameters:
+// - number: the unique number of the parcel to be updated.
+// - status: the new status to set for the parcel.
+//
+// Returns:
+// - An error, if any occurs during the update operation.
 func (s ParcelStore) SetStatus(number int, status string) error {
-	// реализуйте обновление статуса в таблице parcel
-
-	return nil
+	_, err := s.db.Exec("UPDATE parcel SET status = ? WHERE number = ?", status, number)
+	return err
 }
 
+// SetAddress updates the address of a parcel identified by its number.
+//
+// Parameters:
+// - number: the unique number of the parcel to be updated.
+// - address: the new address to set for the parcel.
+//
+// Returns:
+// - An error, if any occurs during the update operation.
 func (s ParcelStore) SetAddress(number int, address string) error {
-	// реализуйте обновление адреса в таблице parcel
-	// менять адрес можно только если значение статуса registered
-
-	return nil
+	_, err := s.db.Exec("UPDATE parcel SET address = ? WHERE number = ?", address, number)
+	return err
 }
 
+// Delete removes a parcel from the database identified by its number.
+// The parcel will only be deleted if its status is 'registered'.
+//
+// Parameters:
+// - number: the unique number of the parcel to be deleted.
+//
+// Returns:
+// - An error, if any occurs during the deletion operation.
 func (s ParcelStore) Delete(number int) error {
-	// реализуйте удаление строки из таблицы parcel
-	// удалять строку можно только если значение статуса registered
-
-	return nil
+	_, err := s.db.Exec("DELETE FROM parcel WHERE number = ? AND status = registered", number)
+	return err
 }
