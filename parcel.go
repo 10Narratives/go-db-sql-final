@@ -19,9 +19,9 @@ const (
 // Parcel struct represents the information of a parcel.
 type Parcel struct {
 	// Number is a unique identifier for the parcel.
-	Number int `json:"number"`
+	Number int64 `json:"number"`
 	// Client is the identifier of the client who ordered the parcel.
-	Client int `json:"client"`
+	Client int64 `json:"client"`
 	// Status is the current status of the parcel.
 	Status string `json:"status"`
 	// Address is the destination address of the parcel.
@@ -72,7 +72,7 @@ func NewParcelService(store ParcelStore) ParcelService {
 //   - The created Parcel, which includes the assigned number and
 //     other details.
 //   - An error, if any occurred during the registration process.
-func (s ParcelService) Register(client int, address string) (Parcel, error) {
+func (s ParcelService) Register(client int64, address string) (Parcel, error) {
 	parcel := Parcel{
 		Client:    client,
 		Status:    ParcelStatusRegistered,
@@ -80,12 +80,10 @@ func (s ParcelService) Register(client int, address string) (Parcel, error) {
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
-	id, err := s.store.Add(parcel)
+	err := s.store.Add(&parcel)
 	if err != nil {
 		return parcel, err
 	}
-
-	parcel.Number = id
 
 	fmt.Printf("Новая посылка № %d на адрес %s от клиента с идентификатором %d зарегистрирована %s\n",
 		parcel.Number, parcel.Address, parcel.Client, parcel.CreatedAt)
@@ -230,20 +228,24 @@ func NewParcelStore(db *sql.DB) ParcelStore {
 // Returns:
 // - The ID of the last inserted Parcel.
 // - An error, if any occurs during the insert operation.
-func (s ParcelStore) Add(p Parcel) (int, error) {
-	result, err := s.db.Exec("INSERT INTO parcel (number, client, status, address, created_at) VALUES (?, ?, ?, ?, ?)",
-		p.Number, p.Client, p.Status, p.Address, p.CreatedAt)
+func (s ParcelStore) Add(p *Parcel) error {
+	if p == nil {
+		return errors.New("gotten pointer is equal to nil")
+	}
+
+	result, err := s.db.Exec("INSERT INTO parcel (client, status, address, created_at) VALUES (?, ?, ?, ?)", p.Client, p.Status, p.Address, p.CreatedAt)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	lastParcelID, err := result.LastInsertId()
 	if err != nil {
-		return 0, nil
+		return err
 	}
 
-	// верните идентификатор последней добавленной записи
-	return int(lastParcelID), nil
+	p.Number = lastParcelID
+
+	return nil
 }
 
 // Get retrieves a parcel from the database by its number.
@@ -257,9 +259,9 @@ func (s ParcelStore) Add(p Parcel) (int, error) {
 func (s ParcelStore) Get(number int) (Parcel, error) {
 	row := s.db.QueryRow("SELECT number, client, status, address, created_at FROM parcel WHERE id = ?", number)
 
-	p := Parcel{}
+	gottenParcel := Parcel{}
 
-	err := row.Scan(&p.Number, &p.Client, &p.Status, &p.Address, &p.CreatedAt)
+	err := row.Scan(&gottenParcel.Number, &gottenParcel.Client, &gottenParcel.Status, &gottenParcel.Address, &gottenParcel.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Parcel{}, nil
 	}
@@ -268,7 +270,7 @@ func (s ParcelStore) Get(number int) (Parcel, error) {
 		return Parcel{}, err
 	}
 
-	return p, nil
+	return gottenParcel, nil
 }
 
 // GetByClient retrieves a list of parcels associated with a specific client.

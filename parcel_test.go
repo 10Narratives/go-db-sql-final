@@ -1,123 +1,121 @@
 package main
 
-/*
 import (
-	"database/sql"
-	"math/rand"
+	"errors"
 	"testing"
-	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
 
-var (
-	// randSource источник псевдо случайных чисел.
-	// Для повышения уникальности в качестве seed
-	// используется текущее время в unix формате (в виде числа)
-	randSource = rand.NewSource(time.Now().UnixNano())
-	// randRange использует randSource для генерации случайных чисел
-	randRange = rand.New(randSource)
-)
+func TestAdd(t *testing.T) {
+	t.Parallel()
 
-// getTestParcel возвращает тестовую посылку
-func getTestParcel() Parcel {
-	return Parcel{
-		Client:    1000,
-		Status:    ParcelStatusRegistered,
-		Address:   "test",
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-	}
-}
-
-// TestAddGetDelete проверяет добавление, получение и удаление посылки
-func TestAddGetDelete(t *testing.T) {
-	// prepare
-	db, err := // настройте подключение к БД
-	store := NewParcelStore(db)
-	parcel := getTestParcel()
-
-	// add
-	// добавьте новую посылку в БД, убедитесь в отсутствии ошибки и наличии идентификатора
-
-	// get
-	// получите только что добавленную посылку, убедитесь в отсутствии ошибки
-	// проверьте, что значения всех полей в полученном объекте совпадают со значениями полей в переменной parcel
-
-	// delete
-	// удалите добавленную посылку, убедитесь в отсутствии ошибки
-	// проверьте, что посылку больше нельзя получить из БД
-}
-
-// TestSetAddress проверяет обновление адреса
-func TestSetAddress(t *testing.T) {
-	// prepare
-	db, err := // настройте подключение к БД
-
-	// add
-	// добавьте новую посылку в БД, убедитесь в отсутствии ошибки и наличии идентификатора
-
-	// set address
-	// обновите адрес, убедитесь в отсутствии ошибки
-	newAddress := "new test address"
-
-	// check
-	// получите добавленную посылку и убедитесь, что адрес обновился
-}
-
-// TestSetStatus проверяет обновление статуса
-func TestSetStatus(t *testing.T) {
-	// prepare
-	db, err := // настройте подключение к БД
-
-	// add
-	// добавьте новую посылку в БД, убедитесь в отсутствии ошибки и наличии идентификатора
-
-	// set status
-	// обновите статус, убедитесь в отсутствии ошибки
-
-	// check
-	// получите добавленную посылку и убедитесь, что статус обновился
-}
-
-// TestGetByClient проверяет получение посылок по идентификатору клиента
-func TestGetByClient(t *testing.T) {
-	// prepare
-	db, err := // настройте подключение к БД
-
-	parcels := []Parcel{
-		getTestParcel(),
-		getTestParcel(),
-		getTestParcel(),
-	}
-	parcelMap := map[int]Parcel{}
-
-	// задаём всем посылкам один и тот же идентификатор клиента
-	client := randRange.Intn(10_000_000)
-	parcels[0].Client = client
-	parcels[1].Client = client
-	parcels[2].Client = client
-
-	// add
-	for i := 0; i < len(parcels); i++ {
-		id, err := // добавьте новую посылку в БД, убедитесь в отсутствии ошибки и наличии идентификатора
-
-		// обновляем идентификатор добавленной у посылки
-		parcels[i].Number = id
-
-		// сохраняем добавленную посылку в структуру map, чтобы её можно было легко достать по идентификатору посылки
-		parcelMap[id] = parcels[i]
+	type args struct {
+		parcel *Parcel
 	}
 
-	// get by client
-	storedParcels, err := // получите список посылок по идентификатору клиента, сохранённого в переменной client
-	// убедитесь в отсутствии ошибки
-	// убедитесь, что количество полученных посылок совпадает с количеством добавленных
+	var (
+		number    int64  = 101
+		client    int64  = 102
+		address   string = "test address"
+		status    string = ParcelStatusRegistered
+		createdAt string = "test time"
+	)
 
-	// check
-	for _, parcel := range storedParcels {
-		// в parcelMap лежат добавленные посылки, ключ - идентификатор посылки, значение - сама посылка
-		// убедитесь, что все посылки из storedParcels есть в parcelMap
-		// убедитесь, что значения полей полученных посылок заполнены верно
+	tests := []struct {
+		name       string
+		mocks      func(dbMock sqlmock.Sqlmock)
+		args       args
+		wantParcel require.ValueAssertionFunc
+		wantErr    require.ErrorAssertionFunc
+	}{
+		{
+			name: "success",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.
+					ExpectExec("INSERT INTO parcel").
+					WithArgs(client, status, address, createdAt).
+					WillReturnResult(sqlmock.NewResult(number, 1))
+			},
+			args: args{
+				parcel: &Parcel{
+					Client:    client,
+					Address:   address,
+					Status:    status,
+					CreatedAt: createdAt,
+				},
+			},
+			wantParcel: func(tt require.TestingT, got interface{}, i ...interface{}) {
+				parcel, ok := got.(*Parcel)
+				require.True(t, ok)
+				require.NotNil(t, parcel, i...)
+				require.Equal(t, number, parcel.Number, i...)
+				require.Equal(t, client, parcel.Client, i...)
+				require.Equal(t, address, parcel.Address, i...)
+				require.Equal(t, status, parcel.Status, i...)
+				require.Equal(t, createdAt, parcel.CreatedAt, i...)
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "database error",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.
+					ExpectExec("INSERT INTO parcel").
+					WithArgs(client, status, address, createdAt).
+					WillReturnError(errors.New("database error"))
+			},
+			args: args{
+				parcel: &Parcel{
+					Client:    client,
+					Address:   address,
+					Status:    status,
+					CreatedAt: createdAt,
+				},
+			},
+			wantParcel: func(tt require.TestingT, got interface{}, i ...interface{}) {
+				parcel, ok := got.(*Parcel)
+				require.True(t, ok)
+				require.NotNil(t, parcel, i...)
+				require.Equal(t, int64(0), parcel.Number, i...)
+				require.Equal(t, client, parcel.Client, i...)
+				require.Equal(t, address, parcel.Address, i...)
+				require.Equal(t, status, parcel.Status, i...)
+				require.Equal(t, createdAt, parcel.CreatedAt, i...)
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.EqualError(t, err, "database error", i...)
+			},
+		},
+		{
+			name:  "no parcel",
+			mocks: func(dbMock sqlmock.Sqlmock) {},
+			args: args{
+				parcel: nil,
+			},
+			wantParcel: require.Nil,
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.EqualError(t, err, "gotten pointer is equal to nil", i...)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db, dbMock, err := sqlmock.New()
+			require.NoError(t, err)
+
+			store := NewParcelStore(db)
+			tt.mocks(dbMock)
+
+			err = store.Add(tt.args.parcel)
+			tt.wantErr(t, err)
+			tt.wantParcel(t, tt.args.parcel)
+
+			require.NoError(t, dbMock.ExpectationsWereMet())
+		})
 	}
 }
-*/
