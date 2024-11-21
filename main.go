@@ -9,8 +9,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func openDB() (*sql.DB, func(), error) {
-	db, err := sql.Open(os.Getenv("DB_DRIVER"), os.Getenv("DB_DNS"))
+func setDefault(key, value string) {
+	if os.Getenv(key) == "" {
+		os.Setenv(key, value)
+	}
+}
+
+func openDB(driver, dns string) (*sql.DB, func(), error) {
+	db, err := sql.Open(driver, dns)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -25,12 +31,20 @@ func openDB() (*sql.DB, func(), error) {
 func main() {
 	err := godotenv.Load()
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
+		return
 	}
 
-	db, closeFunc, err := openDB()
+	setDefault("DB_DRIVER", "postgres")
+	setDefault("DB_DNS", "example.db")
+
+	databaseDriver := os.Getenv("DB_DRIVER")
+	databaseDNS := os.Getenv("DB_DNS")
+
+	db, closeFunc, err := openDB(databaseDriver, databaseDNS)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
+		return
 	}
 	defer closeFunc()
 
