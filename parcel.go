@@ -82,7 +82,7 @@ func (s ParcelService) Register(client int64, address string) (Parcel, error) {
 
 	err := s.store.Add(&parcel)
 	if err != nil {
-		return parcel, err
+		return Parcel{}, err
 	}
 
 	fmt.Printf("Новая посылка № %d на адрес %s от клиента с идентификатором %d зарегистрирована %s\n",
@@ -116,7 +116,6 @@ func (s ParcelService) PrintClientParcels(client int) error {
 		fmt.Printf("Посылка № %d на адрес %s от клиента с идентификатором %d зарегистрирована %s, статус %s\n",
 			parcel.Number, parcel.Address, parcel.Client, parcel.CreatedAt, parcel.Status)
 	}
-	fmt.Println()
 
 	return nil
 }
@@ -300,6 +299,10 @@ func (s ParcelStore) GetByClient(client int) ([]Parcel, error) {
 		}
 
 		parcels = append(parcels, newParcel)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return parcels, nil
