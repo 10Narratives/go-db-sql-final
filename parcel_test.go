@@ -2,120 +2,554 @@ package main
 
 import (
 	"database/sql"
-	"math/rand"
+	"errors"
+	"regexp"
 	"testing"
-	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var (
-	// randSource источник псевдо случайных чисел.
-	// Для повышения уникальности в качестве seed
-	// используется текущее время в unix формате (в виде числа)
-	randSource = rand.NewSource(time.Now().UnixNano())
-	// randRange использует randSource для генерации случайных чисел
-	randRange = rand.New(randSource)
-)
+func TestAdd(t *testing.T) {
+	t.Parallel()
 
-// getTestParcel возвращает тестовую посылку
-func getTestParcel() Parcel {
-	return Parcel{
-		Client:    1000,
-		Status:    ParcelStatusRegistered,
-		Address:   "test",
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	type args struct {
+		parcel *Parcel
+	}
+
+	var (
+		number    int64  = 101
+		client    int64  = 102
+		address   string = "test address"
+		status    string = ParcelStatusRegistered
+		createdAt string = "test time"
+	)
+
+	tests := []struct {
+		name       string
+		mocks      func(dbMock sqlmock.Sqlmock)
+		args       args
+		wantParcel require.ValueAssertionFunc
+		wantErr    require.ErrorAssertionFunc
+	}{
+		{
+			name: "success",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.
+					ExpectExec("INSERT INTO parcel").
+					WithArgs(client, status, address, createdAt).
+					WillReturnResult(sqlmock.NewResult(number, 1))
+			},
+			args: args{
+				parcel: &Parcel{
+					Client:    client,
+					Address:   address,
+					Status:    status,
+					CreatedAt: createdAt,
+				},
+			},
+			wantParcel: func(tt require.TestingT, got interface{}, i ...interface{}) {
+				parcel, ok := got.(*Parcel)
+				require.True(t, ok)
+				require.NotNil(t, parcel, i...)
+				assert.Equal(t, number, parcel.Number, i...)
+				assert.Equal(t, client, parcel.Client, i...)
+				assert.Equal(t, address, parcel.Address, i...)
+				assert.Equal(t, status, parcel.Status, i...)
+				assert.Equal(t, createdAt, parcel.CreatedAt, i...)
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "database error",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.
+					ExpectExec("INSERT INTO parcel").
+					WithArgs(client, status, address, createdAt).
+					WillReturnError(errors.New("database error"))
+			},
+			args: args{
+				parcel: &Parcel{
+					Client:    client,
+					Address:   address,
+					Status:    status,
+					CreatedAt: createdAt,
+				},
+			},
+			wantParcel: func(tt require.TestingT, got interface{}, i ...interface{}) {
+				parcel, ok := got.(*Parcel)
+				require.True(t, ok)
+				require.NotNil(t, parcel, i...)
+				require.Equal(t, int64(0), parcel.Number, i...)
+				require.Equal(t, client, parcel.Client, i...)
+				require.Equal(t, address, parcel.Address, i...)
+				require.Equal(t, status, parcel.Status, i...)
+				require.Equal(t, createdAt, parcel.CreatedAt, i...)
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.EqualError(t, err, "database error", i...)
+			},
+		},
+		{
+			name:  "no parcel",
+			mocks: func(dbMock sqlmock.Sqlmock) {},
+			args: args{
+				parcel: nil,
+			},
+			wantParcel: require.Nil,
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.EqualError(t, err, "gotten pointer is equal to nil", i...)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db, dbMock, err := sqlmock.New()
+			require.NoError(t, err)
+
+			store := NewParcelStore(db)
+			tt.mocks(dbMock)
+
+			err = store.Add(tt.args.parcel)
+			tt.wantErr(t, err)
+			tt.wantParcel(t, tt.args.parcel)
+
+			require.NoError(t, dbMock.ExpectationsWereMet())
+		})
 	}
 }
 
-// TestAddGetDelete проверяет добавление, получение и удаление посылки
-func TestAddGetDelete(t *testing.T) {
-	// prepare
-	db, err := // настройте подключение к БД
-	store := NewParcelStore(db)
-	parcel := getTestParcel()
+func TestGet(t *testing.T) {
+	t.Parallel()
 
-	// add
-	// добавьте новую посылку в БД, убедитесь в отсутствии ошибки и наличии идентификатора
+	var (
+		number    int    = 101
+		client    string = "Test Client"
+		address   string = "Test Address"
+		status    string = "Registered"
+		createdAt string = "2023-11-20T10:00:00Z"
+	)
 
-	// get
-	// получите только что добавленную посылку, убедитесь в отсутствии ошибки
-	// проверьте, что значения всех полей в полученном объекте совпадают со значениями полей в переменной parcel
+	tests := []struct {
+		name       string
+		mocks      func(dbMock sqlmock.Sqlmock)
+		number     int
+		wantParcel require.ValueAssertionFunc
+		wantErr    require.ErrorAssertionFunc
+	}{
+		{
+			name: "success",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				rows := sqlmock.NewRows([]string{"number", "client", "status", "address", "created_at"}).
+					AddRow(number, client, status, address, createdAt)
+				dbMock.ExpectQuery("SELECT number, client, status, address, created_at FROM parcel WHERE id = ?").
+					WithArgs(number).
+					WillReturnRows(rows)
+			},
+			number: number,
+			wantParcel: func(tt require.TestingT, got interface{}, i ...interface{}) {
+				parcel, ok := got.(Parcel)
+				require.True(t, ok)
+				assert.Equal(t, number, parcel.Number)
+				assert.Equal(t, client, parcel.Client)
+				assert.Equal(t, address, parcel.Address)
+				assert.Equal(t, status, parcel.Status)
+				assert.Equal(t, createdAt, parcel.CreatedAt)
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "no rows",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.ExpectQuery("SELECT number, client, status, address, created_at FROM parcel WHERE id = ?").
+					WithArgs(number).
+					WillReturnError(sql.ErrNoRows)
+			},
+			number: number,
+			wantParcel: func(tt require.TestingT, got interface{}, i ...interface{}) {
+				parcel, ok := got.(Parcel)
+				require.True(t, ok)
+				require.Equal(t, Parcel{}, parcel)
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "database error",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.ExpectQuery("SELECT number, client, status, address, created_at FROM parcel WHERE id = ?").
+					WithArgs(number).
+					WillReturnError(errors.New("database error"))
+			},
+			number: number,
+			wantParcel: func(tt require.TestingT, got interface{}, i ...interface{}) {
+				parcel, ok := got.(Parcel)
+				require.True(t, ok)
+				require.Equal(t, Parcel{}, parcel)
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.EqualError(t, err, "database error")
+			},
+		},
+	}
 
-	// delete
-	// удалите добавленную посылку, убедитесь в отсутствии ошибки
-	// проверьте, что посылку больше нельзя получить из БД
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db, dbMock, err := sqlmock.New()
+			require.NoError(t, err)
+
+			store := ParcelStore{db: db}
+			tt.mocks(dbMock)
+
+			parcel, err := store.Get(tt.number)
+			tt.wantErr(t, err)
+			tt.wantParcel(t, parcel)
+
+			require.NoError(t, dbMock.ExpectationsWereMet())
+		})
+	}
 }
 
-// TestSetAddress проверяет обновление адреса
-func TestSetAddress(t *testing.T) {
-	// prepare
-	db, err := // настройте подключение к БД
-
-	// add
-	// добавьте новую посылку в БД, убедитесь в отсутствии ошибки и наличии идентификатора
-
-	// set address
-	// обновите адрес, убедитесь в отсутствии ошибки
-	newAddress := "new test address"
-
-	// check
-	// получите добавленную посылку и убедитесь, что адрес обновился
-}
-
-// TestSetStatus проверяет обновление статуса
-func TestSetStatus(t *testing.T) {
-	// prepare
-	db, err := // настройте подключение к БД
-
-	// add
-	// добавьте новую посылку в БД, убедитесь в отсутствии ошибки и наличии идентификатора
-
-	// set status
-	// обновите статус, убедитесь в отсутствии ошибки
-
-	// check
-	// получите добавленную посылку и убедитесь, что статус обновился
-}
-
-// TestGetByClient проверяет получение посылок по идентификатору клиента
 func TestGetByClient(t *testing.T) {
-	// prepare
-	db, err := // настройте подключение к БД
+	t.Parallel()
 
-	parcels := []Parcel{
-		getTestParcel(),
-		getTestParcel(),
-		getTestParcel(),
-	}
-	parcelMap := map[int]Parcel{}
-
-	// задаём всем посылкам один и тот же идентификатор клиента
-	client := randRange.Intn(10_000_000)
-	parcels[0].Client = client
-	parcels[1].Client = client
-	parcels[2].Client = client
-
-	// add
-	for i := 0; i < len(parcels); i++ {
-		id, err := // добавьте новую посылку в БД, убедитесь в отсутствии ошибки и наличии идентификатора
-
-		// обновляем идентификатор добавленной у посылки
-		parcels[i].Number = id
-
-		// сохраняем добавленную посылку в структуру map, чтобы её можно было легко достать по идентификатору посылки
-		parcelMap[id] = parcels[i]
+	type args struct {
+		client int
 	}
 
-	// get by client
-	storedParcels, err := // получите список посылок по идентификатору клиента, сохранённого в переменной client
-	// убедитесь в отсутствии ошибки
-	// убедитесь, что количество полученных посылок совпадает с количеством добавленных
+	tests := []struct {
+		name        string
+		mocks       func(dbMock sqlmock.Sqlmock, client int)
+		args        args
+		wantParcels require.ValueAssertionFunc
+		wantErr     require.ErrorAssertionFunc
+	}{
+		{
+			name: "success",
+			args: args{
+				client: 102,
+			},
+			mocks: func(dbMock sqlmock.Sqlmock, client int) {
+				rows := sqlmock.NewRows([]string{"number", "client", "status", "address", "created_at"}).
+					AddRow(101, 102, "Registered", "Address 1", "2023-11-20T10:00:00Z").
+					AddRow(102, 102, "Delivered", "Address 2", "2023-11-21T11:00:00Z")
+				dbMock.ExpectQuery("SELECT number, client, status, address, created_at FROM percel WHERE client = ?").
+					WithArgs(client).
+					WillReturnRows(rows)
+			},
+			wantParcels: func(tt require.TestingT, got interface{}, i ...interface{}) {
+				parcels, ok := got.([]Parcel)
+				require.True(tt, ok)
+				assert.Len(tt, parcels, 2)
+				assert.Equal(tt, 101, parcels[0].Number)
+				assert.Equal(tt, 102, parcels[0].Client)
+				assert.Equal(tt, "Registered", parcels[0].Status)
+				assert.Equal(tt, "Address 1", parcels[0].Address)
+				assert.Equal(tt, "2023-11-20T10:00:00Z", parcels[0].CreatedAt)
 
-	// check
-	for _, parcel := range storedParcels {
-		// в parcelMap лежат добавленные посылки, ключ - идентификатор посылки, значение - сама посылка
-		// убедитесь, что все посылки из storedParcels есть в parcelMap
-		// убедитесь, что значения полей полученных посылок заполнены верно
+				assert.Equal(tt, 102, parcels[1].Number)
+				assert.Equal(tt, 102, parcels[1].Client)
+				assert.Equal(tt, "Delivered", parcels[1].Status)
+				assert.Equal(tt, "Address 2", parcels[1].Address)
+				assert.Equal(tt, "2023-11-21T11:00:00Z", parcels[1].CreatedAt)
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "no records",
+			args: args{
+				client: 103,
+			},
+			mocks: func(dbMock sqlmock.Sqlmock, client int) {
+				rows := sqlmock.NewRows([]string{"number", "client", "status", "address", "created_at"})
+				dbMock.ExpectQuery("SELECT number, client, status, address, created_at FROM percel WHERE client = ?").
+					WithArgs(client).
+					WillReturnRows(rows)
+			},
+			wantParcels: func(tt require.TestingT, got interface{}, i ...interface{}) {
+				parcels, ok := got.([]Parcel)
+				require.True(tt, ok)
+				require.Empty(tt, parcels)
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "database error",
+			args: args{
+				client: 104,
+			},
+			mocks: func(dbMock sqlmock.Sqlmock, client int) {
+				dbMock.ExpectQuery("SELECT number, client, status, address, created_at FROM percel WHERE client = ?").
+					WithArgs(client).
+					WillReturnError(errors.New("database error"))
+			},
+			wantParcels: func(tt require.TestingT, got interface{}, i ...interface{}) {
+				require.Nil(tt, got)
+			},
+			wantErr: func(tt require.TestingT, err error, i ...interface{}) {
+				require.EqualError(tt, err, "database error")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db, dbMock, err := sqlmock.New()
+			require.NoError(t, err)
+
+			store := ParcelStore{db: db}
+			tt.mocks(dbMock, tt.args.client)
+
+			parcels, err := store.GetByClient(tt.args.client)
+			tt.wantErr(t, err)
+			tt.wantParcels(t, parcels)
+
+			require.NoError(t, dbMock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestSetStatus(t *testing.T) {
+	t.Parallel()
+
+	type args struct {
+		number int
+		status string
+	}
+
+	tests := []struct {
+		name    string
+		mocks   func(dbMock sqlmock.Sqlmock, number int, status string)
+		args    args
+		wantErr require.ErrorAssertionFunc
+	}{
+		{
+			name: "success",
+			args: args{
+				number: 101,
+				status: "Delivered",
+			},
+			mocks: func(dbMock sqlmock.Sqlmock, number int, status string) {
+				dbMock.
+					ExpectExec(regexp.QuoteMeta("UPDATE parcel SET status = ? WHERE number = ?")).
+					WithArgs(status, number).
+					WillReturnResult(sqlmock.NewResult(0, 1)) // 1 row affected
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "no rows affected",
+			args: args{
+				number: 999,
+				status: "Delivered",
+			},
+			mocks: func(dbMock sqlmock.Sqlmock, number int, status string) {
+				dbMock.
+					ExpectExec(regexp.QuoteMeta("UPDATE parcel SET status = ? WHERE number = ?")).
+					WithArgs(status, number).
+					WillReturnResult(sqlmock.NewResult(0, 0)) // No rows affected
+			},
+			wantErr: func(tt require.TestingT, err error, i ...interface{}) {
+				require.NoError(tt, err, i...)
+			},
+		},
+		{
+			name: "database error",
+			args: args{
+				number: 101,
+				status: "Delivered",
+			},
+			mocks: func(dbMock sqlmock.Sqlmock, number int, status string) {
+				dbMock.
+					ExpectExec(regexp.QuoteMeta("UPDATE parcel SET status = ? WHERE number = ?")).
+					WithArgs(status, number).
+					WillReturnError(errors.New("database error"))
+			},
+			wantErr: func(tt require.TestingT, err error, i ...interface{}) {
+				require.EqualError(tt, err, "database error", i...)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db, dbMock, err := sqlmock.New()
+			require.NoError(t, err)
+
+			store := ParcelStore{db: db}
+			tt.mocks(dbMock, tt.args.number, tt.args.status)
+
+			err = store.SetStatus(tt.args.number, tt.args.status)
+			tt.wantErr(t, err)
+
+			require.NoError(t, dbMock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestSetAddress(t *testing.T) {
+	t.Parallel()
+
+	type args struct {
+		number  int
+		address string
+	}
+
+	tests := []struct {
+		name    string
+		mocks   func(dbMock sqlmock.Sqlmock)
+		args    args
+		wantErr require.ErrorAssertionFunc
+	}{
+		{
+			name: "success",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.
+					ExpectExec(regexp.QuoteMeta("UPDATE parcel SET address = ? WHERE number = ?")).
+					WithArgs("new address", 101).
+					WillReturnResult(sqlmock.NewResult(0, 1))
+			},
+			args: args{
+				number:  101,
+				address: "new address",
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "database error",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.
+					ExpectExec(regexp.QuoteMeta("UPDATE parcel SET address = ? WHERE number = ?")).
+					WithArgs("new address", 101).
+					WillReturnError(errors.New("database error"))
+			},
+			args: args{
+				number:  101,
+				address: "new address",
+			},
+			wantErr: func(tt require.TestingT, err error, i ...interface{}) {
+				require.EqualError(tt, err, "database error", i...)
+			},
+		},
+		{
+			name: "no rows affected",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.
+					ExpectExec(regexp.QuoteMeta("UPDATE parcel SET address = ? WHERE number = ?")).
+					WithArgs("new address", 999).
+					WillReturnResult(sqlmock.NewResult(0, 0))
+			},
+			args: args{
+				number:  999,
+				address: "new address",
+			},
+			wantErr: func(tt require.TestingT, err error, i ...interface{}) {
+				require.NoError(tt, err, i...)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db, dbMock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+
+			store := NewParcelStore(db)
+			tt.mocks(dbMock)
+
+			err = store.SetAddress(tt.args.number, tt.args.address)
+			tt.wantErr(t, err)
+
+			require.NoError(t, dbMock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestDelete(t *testing.T) {
+	t.Parallel()
+
+	type args struct {
+		number int
+	}
+
+	tests := []struct {
+		name    string
+		mocks   func(dbMock sqlmock.Sqlmock)
+		args    args
+		wantErr require.ErrorAssertionFunc
+	}{
+		{
+			name: "success",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.
+					ExpectExec(regexp.QuoteMeta("DELETE FROM parcel WHERE number = ? AND status = registered")).
+					WithArgs(101).
+					WillReturnResult(sqlmock.NewResult(0, 1))
+			},
+			args: args{
+				number: 101,
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "database error",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.
+					ExpectExec(regexp.QuoteMeta("DELETE FROM parcel WHERE number = ? AND status = registered")).
+					WithArgs(101).
+					WillReturnError(errors.New("database error"))
+			},
+			args: args{
+				number: 101,
+			},
+			wantErr: func(tt require.TestingT, err error, i ...interface{}) {
+				require.EqualError(tt, err, "database error", i...)
+			},
+		},
+		{
+			name: "no rows affected",
+			mocks: func(dbMock sqlmock.Sqlmock) {
+				dbMock.
+					ExpectExec(regexp.QuoteMeta("DELETE FROM parcel WHERE number = ? AND status = registered")).
+					WithArgs(999).
+					WillReturnResult(sqlmock.NewResult(0, 0))
+			},
+			args: args{
+				number: 999,
+			},
+			wantErr: func(tt require.TestingT, err error, i ...interface{}) {
+				require.NoError(tt, err, i...)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db, dbMock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+
+			store := NewParcelStore(db)
+			tt.mocks(dbMock)
+
+			err = store.Delete(tt.args.number)
+			tt.wantErr(t, err)
+
+			require.NoError(t, dbMock.ExpectationsWereMet())
+		})
 	}
 }
