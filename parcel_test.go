@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,11 +53,11 @@ func TestAdd(t *testing.T) {
 				parcel, ok := got.(*Parcel)
 				require.True(t, ok)
 				require.NotNil(t, parcel, i...)
-				require.Equal(t, number, parcel.Number, i...)
-				require.Equal(t, client, parcel.Client, i...)
-				require.Equal(t, address, parcel.Address, i...)
-				require.Equal(t, status, parcel.Status, i...)
-				require.Equal(t, createdAt, parcel.CreatedAt, i...)
+				assert.Equal(t, number, parcel.Number, i...)
+				assert.Equal(t, client, parcel.Client, i...)
+				assert.Equal(t, address, parcel.Address, i...)
+				assert.Equal(t, status, parcel.Status, i...)
+				assert.Equal(t, createdAt, parcel.CreatedAt, i...)
 			},
 			wantErr: require.NoError,
 		},
@@ -153,11 +154,11 @@ func TestGet(t *testing.T) {
 			wantParcel: func(tt require.TestingT, got interface{}, i ...interface{}) {
 				parcel, ok := got.(Parcel)
 				require.True(t, ok)
-				require.Equal(t, number, parcel.Number)
-				require.Equal(t, client, parcel.Client)
-				require.Equal(t, address, parcel.Address)
-				require.Equal(t, status, parcel.Status)
-				require.Equal(t, createdAt, parcel.CreatedAt)
+				assert.Equal(t, number, parcel.Number)
+				assert.Equal(t, client, parcel.Client)
+				assert.Equal(t, address, parcel.Address)
+				assert.Equal(t, status, parcel.Status)
+				assert.Equal(t, createdAt, parcel.CreatedAt)
 			},
 			wantErr: require.NoError,
 		},
@@ -244,18 +245,18 @@ func TestGetByClient(t *testing.T) {
 			wantParcels: func(tt require.TestingT, got interface{}, i ...interface{}) {
 				parcels, ok := got.([]Parcel)
 				require.True(tt, ok)
-				require.Len(tt, parcels, 2)
-				require.Equal(tt, 101, parcels[0].Number)
-				require.Equal(tt, 102, parcels[0].Client)
-				require.Equal(tt, "Registered", parcels[0].Status)
-				require.Equal(tt, "Address 1", parcels[0].Address)
-				require.Equal(tt, "2023-11-20T10:00:00Z", parcels[0].CreatedAt)
+				assert.Len(tt, parcels, 2)
+				assert.Equal(tt, 101, parcels[0].Number)
+				assert.Equal(tt, 102, parcels[0].Client)
+				assert.Equal(tt, "Registered", parcels[0].Status)
+				assert.Equal(tt, "Address 1", parcels[0].Address)
+				assert.Equal(tt, "2023-11-20T10:00:00Z", parcels[0].CreatedAt)
 
-				require.Equal(tt, 102, parcels[1].Number)
-				require.Equal(tt, 102, parcels[1].Client)
-				require.Equal(tt, "Delivered", parcels[1].Status)
-				require.Equal(tt, "Address 2", parcels[1].Address)
-				require.Equal(tt, "2023-11-21T11:00:00Z", parcels[1].CreatedAt)
+				assert.Equal(tt, 102, parcels[1].Number)
+				assert.Equal(tt, 102, parcels[1].Client)
+				assert.Equal(tt, "Delivered", parcels[1].Status)
+				assert.Equal(tt, "Address 2", parcels[1].Address)
+				assert.Equal(tt, "2023-11-21T11:00:00Z", parcels[1].CreatedAt)
 			},
 			wantErr: require.NoError,
 		},
